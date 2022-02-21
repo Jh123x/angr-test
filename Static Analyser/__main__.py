@@ -1,37 +1,45 @@
 import os
+import sys
 import angr
 import argparse
 import claripy
 
 
+def is_successful(state):
+	output = state.posix.dumps(sys.stdout.fileno()) #grab the screen output everytime Angr thinks we have a solution
+	if b'Solved!' in output: #make sure it says 'Solved'!
+		return True
+	return False
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Static Analyser")
     parser.add_argument("binary", help="Path to the binary to analyse")
-    parser.add_argument("no_input", type=int, help="Number of inputs")
-    parser.add_argument("-b", "--base", help="Base address of the binary", type=hex, default=0x00)
-    parser.add_argument("-t", "--target", help="Target address to to reach", type=hex, default=0x00)
-    
     args = parser.parse_args()
 
     # Get vars
     binary_path = os.path.normpath(args.binary) # Normalize path
-    base = args.base
-    target = args.target
-    no_inputs = args.no_input
 
     # Creating project and exploring
-    p = angr.Project(binary_path, main_opts={'base_addr': base})
-    variables = []
+    print(f"[+] Creating angr project with '{binary_path}'")
+    argv1 = claripy.BVS("a",32)
+    argv2 = claripy.BVS("b",32)
+    p = angr.Project(binary_path)
 
-    for index in range(no_inputs):
-        variables.append(claripy.BVS(f'val{index}', 64))
-
-    entry_state = p.factory.full_init_state(args=[f"./{binary_path}"], variables)
-    simgr = p.factory.simulation_manager(entry_state)
-    simgr.explore(find=target)
+    state = p.factory.entry_state(args=[binary_path, argv1, argv2], add_options={angr.options.LAZY_SOLVES})
+    simgr = p.factory.simgr(state)
+    print(f"[+] Exploring path...")
+    simgr.explore(find=is_successful)
     if len(simgr.found) > 0:
+        print("[+] Vulnerability found")
         for state in simgr.found:
-            state.solver.eval()
+            print(state.solver.eval(state))
+    elif simgr.errored:
+        print("[+] Error found")
+        for state in simgr.errored:
+            print(state)
+    else:
+        print("[-] No vulnerability found")
 
 
 
